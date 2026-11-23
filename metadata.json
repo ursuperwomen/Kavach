@@ -1,6 +1,11 @@
 {
   "name": "Citizen Cyber Trust — Unified Scam & Fraud Analysis Portal",
   "description": "Analyse suspicious messages, phishing URLs, Android APKs, and fraudulent investment or betting websites with explainable risk indicators, cross-case identifier linking, and investigation-ready police evidence reports.",
-  "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -31,8 +31,9 @@ import { RiskBadge } from './RiskBadge';
 
 interface ThreatScannerViewProps {
   lang: AppLanguage;
-  onLangChange: (lang: AppLanguage) => void;
   heatItems: HeatListItem[];
+  isInvestigator?: boolean;
+  authToken?: string | null;
   latestResult: CaseRecord | null;
   onCaseCreated: (record: CaseRecord) => void;
   onCaseUpdated: (record: CaseRecord) => void;
@@ -42,18 +43,19 @@ interface ThreatScannerViewProps {
 }
 
 const APK_PERMISSION_OPTIONS = [
-  { id: 'android.permission.READ_CONTACTS', label: 'READ_CONTACTS (Phonebook)' },
-  { id: 'android.permission.READ_SMS', label: 'READ_SMS (Banking OTPs)' },
-  { id: 'android.permission.RECEIVE_SMS', label: 'RECEIVE_SMS (Live OTP)' },
-  { id: 'android.permission.READ_CALL_LOG', label: 'READ_CALL_LOG (Call History)' },
-  { id: 'android.permission.CAMERA', label: 'CAMERA (Selfie / Photos)' },
-  { id: 'android.permission.SYSTEM_ALERT_WINDOW', label: 'SYSTEM_ALERT_WINDOW (Overlay)' },
+  { id: 'android.permission.READ_CONTACTS', label: 'READ_CONTACTS' },
+  { id: 'android.permission.READ_SMS', label: 'READ_SMS' },
+  { id: 'android.permission.RECEIVE_SMS', label: 'RECEIVE_SMS' },
+  { id: 'android.permission.READ_CALL_LOG', label: 'READ_CALL_LOG' },
+  { id: 'android.permission.CAMERA', label: 'CAMERA' },
+  { id: 'android.permission.SYSTEM_ALERT_WINDOW', label: 'OVERLAY' },
 ];
 
 export function ThreatScannerView({
   lang,
-  onLangChange,
   heatItems,
+  isInvestigator = false,
+  authToken = null,
   latestResult,
   onCaseCreated,
   onCaseUpdated,
@@ -68,13 +70,11 @@ export function ThreatScannerView({
   const [statusNote, setStatusNote] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Photo / Camera state
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [scannedPhotoPreview, setScannedPhotoPreview] = useState<string | null>(null);
   const [photoVisualClues, setPhotoVisualClues] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Voice / Audio recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
@@ -83,7 +83,6 @@ export function ThreatScannerView({
   const timerRef = useRef<number | null>(null);
   const audioFileRef = useRef<HTMLInputElement | null>(null);
 
-  // Collapsible APK Inspector (keeps home screen ultra-clean for kids & elders)
   const [showApkTools, setShowApkTools] = useState(false);
   const [apkAppName, setApkAppName] = useState('');
   const [apkPackageName, setApkPackageName] = useState('');
@@ -103,7 +102,6 @@ export function ThreatScannerView({
     }, 100);
   };
 
-  // Universal Smart Text / Link / APK Analysis
   const analyzeTextOrLink = async (
     textToCheck: string,
     explicitUrl?: string,
@@ -111,30 +109,28 @@ export function ThreatScannerView({
   ) => {
     const trimmed = textToCheck.trim();
     if (!trimmed && !explicitUrl && !apkMeta) {
-      setErrorMessage(
-        lang === 'hi'
-          ? 'कृपया कोई भी लिंक, SMS या WhatsApp मैसेज पेस्ट करें।'
-          : 'Please paste a link, SMS, or WhatsApp message first.'
-      );
+      setErrorMessage(lang === 'hi' ? 'लिंक या मैसेज पेस्ट करें।' : 'Paste a link or message first.');
       return;
     }
 
     setIsAnalyzing(true);
     setErrorMessage(null);
-    setStatusNote(lang === 'hi' ? 'लिंक और मैसेज की जांच हो रही है…' : 'Scanning link & message…');
+    setStatusNote(lang === 'hi' ? 'जांच जारी है…' : 'Scanning…');
     setScannedPhotoPreview(null);
     setPhotoVisualClues(null);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           content: trimmed,
           url: explicitUrl,
           lang,
           channel: /^https?:\/\//i.test(trimmed) ? 'Web Browser' : 'WhatsApp',
-          submittedBy: 'Kavach Citizen Quick Check',
+          submittedBy: authToken ? undefined : 'Kavach Quick Check',
           apkMetadata: apkMeta,
           saveToLedger: true,
         }),
@@ -144,7 +140,7 @@ export function ThreatScannerView({
       onCaseCreated(data.caseRecord as CaseRecord);
       scrollToResult();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Unable to check right now.');
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to check.');
     } finally {
       setIsAnalyzing(false);
       setStatusNote(null);
@@ -168,18 +164,13 @@ export function ThreatScannerView({
     await analyzeTextOrLink(inputText, undefined, apkMeta);
   };
 
-  // Photo / Camera Image Scan
   const analyzeImageBase64 = async (base64Data: string, mimeType: string, previewUrl: string) => {
     setShowCameraModal(false);
     setScannedPhotoPreview(previewUrl);
     setPhotoVisualClues(null);
     setIsAnalyzing(true);
     setErrorMessage(null);
-    setStatusNote(
-      lang === 'hi'
-        ? 'फोटो से लिंक व टेक्स्ट पढ़कर स्कैम की जांच हो रही है…'
-        : 'Reading text & links from your photo…'
-    );
+    setStatusNote(lang === 'hi' ? 'फोटो स्कैन हो रही है…' : 'Scanning photo…');
 
     try {
       const res = await fetch('/api/analyze-image', {
@@ -193,14 +184,9 @@ export function ThreatScannerView({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not scan photo.');
-
-      if (data.extractedText) {
-        setInputText(data.extractedText);
-      }
-      if (data.visualClues) {
-        setPhotoVisualClues(data.visualClues);
-      }
+      if (!res.ok) throw new Error(data.error || 'Photo scan failed.');
+      if (data.extractedText) setInputText(data.extractedText);
+      if (data.visualClues) setPhotoVisualClues(data.visualClues);
       onCaseCreated(data.caseRecord as CaseRecord);
       scrollToResult();
     } catch (err) {
@@ -218,24 +204,17 @@ export function ThreatScannerView({
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : '';
       const base64 = dataUrl.split(',')[1];
-      if (base64) {
-        analyzeImageBase64(base64, file.type || 'image/jpeg', dataUrl);
-      }
+      if (base64) analyzeImageBase64(base64, file.type || 'image/jpeg', dataUrl);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  // Voice Recording & Audio File Upload
   const submitAudioBlob = async (blob: Blob, mimeType: string) => {
     setIsAnalyzing(true);
     setErrorMessage(null);
     setVoiceTranscript(null);
-    setStatusNote(
-      lang === 'hi'
-        ? 'आपकी आवाज़ समझकर स्कैम की जांच हो रही है…'
-        : 'Listening to audio and checking for scams…'
-    );
+    setStatusNote(lang === 'hi' ? 'ऑडियो जांच जारी है…' : 'Analyzing audio…');
 
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -244,7 +223,7 @@ export function ThreatScannerView({
           const result = typeof reader.result === 'string' ? reader.result : '';
           resolve(result.split(',')[1] || '');
         };
-        reader.onerror = () => reject(new Error('Failed to read audio.'));
+        reader.onerror = () => reject(new Error('Audio read failed.'));
         reader.readAsDataURL(blob);
       });
 
@@ -260,7 +239,6 @@ export function ThreatScannerView({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Voice check failed.');
-
       if (data.transcript) {
         setVoiceTranscript(data.transcript);
         setInputText(data.transcript);
@@ -291,11 +269,7 @@ export function ThreatScannerView({
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error(
-          lang === 'hi'
-            ? 'माइक उपलब्ध नहीं है। आप ऑडियो फाइल अपलोड कर सकते हैं।'
-            : 'Microphone unavailable. You can upload an audio clip instead.'
-        );
+        throw new Error(lang === 'hi' ? 'माइक उपलब्ध नहीं है।' : 'Microphone unavailable.');
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
@@ -308,25 +282,21 @@ export function ThreatScannerView({
       recorder.onstop = () => {
         stream.getTracks().forEach((tr) => tr.stop());
         const audioBlob = new Blob(audioChunksRef.current, { type: mime });
-        if (audioBlob.size > 0) {
-          submitAudioBlob(audioBlob, mime);
-        }
+        if (audioBlob.size > 0) submitAudioBlob(audioBlob, mime);
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
       setRecordingSeconds(0);
-      timerRef.current = window.setInterval(() => {
-        setRecordingSeconds((s) => s + 1);
-      }, 1000);
+      timerRef.current = window.setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
     } catch (err) {
       setErrorMessage(
         err instanceof Error
           ? err.message
           : lang === 'hi'
           ? 'माइक की अनुमति नहीं मिली।'
-          : 'Microphone permission denied.'
+          : 'Microphone denied.'
       );
     }
   };
@@ -338,7 +308,6 @@ export function ThreatScannerView({
     e.target.value = '';
   };
 
-  // Static APK File Handler
   const handleApkFile = async (file: File) => {
     try {
       const summary = await inspectApkArchive(file);
@@ -347,12 +316,10 @@ export function ThreatScannerView({
       if (summary.detectedPackageName) setApkPackageName(summary.detectedPackageName);
       if (summary.detectedPermissions.length > 0) setApkPermissions(summary.detectedPermissions);
       if (summary.embeddedStrings.length > 0) {
-        setInputText(
-          `APK File: ${file.name}\nEmbedded endpoints: ${summary.embeddedStrings.join('\n')}`
-        );
+        setInputText(`APK: ${file.name}\n${summary.embeddedStrings.join('\n')}`);
       }
     } catch {
-      setErrorMessage('Could not parse .apk archive.');
+      setErrorMessage('Invalid .apk file.');
     }
   };
 
@@ -363,100 +330,49 @@ export function ThreatScannerView({
   };
 
   const quickExamples = [
-    {
-      label: lang === 'hi' ? 'नकली SBI KYC लिंक' : 'Fake SBI KYC SMS',
-      preset: R4C_SAMPLE_PRESETS[0],
-    },
-    {
-      label: lang === 'hi' ? 'बिजली कटने वाला मैसेज' : 'Electricity Cutoff',
-      preset: R4C_SAMPLE_PRESETS[1],
-    },
-    {
-      label: lang === 'hi' ? '300% फर्जी निवेश साइट' : '300% Ponzi Site',
-      preset: R4C_SAMPLE_PRESETS[3],
-    },
-    {
-      label: lang === 'hi' ? 'नकली लोन APK ऐप' : 'Fake Loan APK',
-      preset: R4C_SAMPLE_PRESETS[2],
-    },
-    {
-      label: lang === 'hi' ? 'असली इंडिया पोस्ट (सुरक्षित)' : 'Real India Post (Safe)',
-      preset: R4C_SAMPLE_PRESETS[6],
-    },
+    { label: lang === 'hi' ? 'नकली SBI KYC' : 'Fake SBI KYC', preset: R4C_SAMPLE_PRESETS[0] },
+    { label: lang === 'hi' ? 'बिजली बिल' : 'Power Cutoff', preset: R4C_SAMPLE_PRESETS[1] },
+    { label: lang === 'hi' ? '300% निवेश' : '300% Ponzi', preset: R4C_SAMPLE_PRESETS[3] },
+    { label: lang === 'hi' ? 'नकली लोन APK' : 'Fake Loan APK', preset: R4C_SAMPLE_PRESETS[2] },
+    { label: lang === 'hi' ? 'इंडिया पोस्ट' : 'India Post', preset: R4C_SAMPLE_PRESETS[6] },
   ];
 
   const topTrendingLinks = heatItems.slice(0, 4);
 
   return (
-    <div className="space-y-10">
-      {/* SHORT, CLEAR HEADER + LANGUAGE SWITCHER */}
-      <section className="flex items-center justify-between gap-3">
-        <h1 className="text-[24px] sm:text-[32px] md:text-[36px] font-extrabold leading-[1.2] tracking-[-0.02em] text-[#0F172A] min-w-0">
-          {t.heroTitle}
-        </h1>
+    <div className="space-y-6 sm:space-y-8">
+      <h1 className="text-[22px] sm:text-[30px] md:text-[34px] font-extrabold leading-tight tracking-[-0.02em] text-[#0F172A]">
+        {t.heroTitle}
+      </h1>
 
-        {/* Effortless Hindi / English Toggle */}
-        <div
-          className="inline-flex items-center p-1 bg-white border border-[#CBD5E1] rounded-lg shrink-0"
-          role="group"
-          aria-label="Language switch"
-        >
-          <button
-            type="button"
-            onClick={() => onLangChange('hi')}
-            className={`min-h-[40px] sm:min-h-[44px] px-3 sm:px-4 rounded-md text-sm sm:text-[15px] font-bold whitespace-nowrap ${
-              lang === 'hi' ? 'bg-[#0F172A] text-white' : 'text-[#334155] hover:text-[#0F172A]'
-            }`}
-          >
-            हिन्दी
-          </button>
-          <button
-            type="button"
-            onClick={() => onLangChange('en')}
-            className={`min-h-[40px] sm:min-h-[44px] px-3 sm:px-4 rounded-md text-sm sm:text-[15px] font-bold whitespace-nowrap ${
-              lang === 'en' ? 'bg-[#0F172A] text-white' : 'text-[#334155] hover:text-[#0F172A]'
-            }`}
-          >
-            English
-          </button>
-        </div>
-      </section>
+      {/* UNIVERSAL CHECKER CARD */}
+      <section className="card-resting rounded-lg p-4 sm:p-6 space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-3.5">
+          <textarea
+            id="kavach-main-input"
+            rows={3}
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder={t.inputPlaceholder}
+            aria-label={t.heroTitle}
+            className="w-full p-3.5 sm:p-4 rounded-lg bg-white border-[1.5px] border-[#94A3B8] text-[15px] sm:text-[17px] leading-relaxed text-[#0F172A] placeholder:text-[#64748B]"
+          />
 
-      {/* MAIN UNIVERSAL KAVACH CHECKER CARD */}
-      <section className="card-resting rounded-lg p-4 sm:p-6 md:p-8 space-y-5">
-        <form onSubmit={handleFormSubmit} className="space-y-4 sm:space-y-5">
-          <div>
-            <label
-              htmlFor="kavach-main-input"
-              className="block text-[16px] sm:text-[17px] font-bold text-[#0F172A] mb-2"
-            >
-              {lang === 'hi' ? 'लिंक या मैसेज यहाँ डालें' : 'Paste link or message'}
-            </label>
-            <textarea
-              id="kavach-main-input"
-              rows={3}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder={t.inputPlaceholder}
-              className="w-full p-3.5 sm:p-4 rounded-lg bg-white border-[1.5px] border-[#94A3B8] text-[16px] sm:text-[18px] leading-[26px] sm:leading-[28px] text-[#0F172A] placeholder:text-[#64748B]"
-            />
-          </div>
-
-          {/* PHONE-FRIENDLY ACTION GRID: Full-width Check Now + 2x2 Photo/Voice Grid on Mobile */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-2.5 sm:gap-3">
+          {/* Seamless Responsive Action Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-2 sm:gap-2.5">
             <button
               type="submit"
               disabled={isAnalyzing}
-              className="col-span-2 sm:col-span-4 lg:col-span-4 min-h-[56px] sm:min-h-[60px] px-5 py-3 rounded-lg bg-[#0F172A] text-white text-[17px] sm:text-[18px] font-bold hover:bg-[#1E293B] disabled:opacity-60 inline-flex items-center justify-center gap-2 whitespace-nowrap"
+              className="col-span-2 sm:col-span-4 lg:col-span-4 min-h-[50px] sm:min-h-[54px] px-4 py-2.5 rounded-lg bg-[#0F172A] text-white text-base sm:text-[17px] font-bold hover:bg-[#1E293B] disabled:opacity-60 inline-flex items-center justify-center gap-2 whitespace-nowrap"
             >
               {isAnalyzing ? (
                 <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <Loader2 className="w-5 h-5 animate-spin shrink-0" />
                   {t.checkingBtn}
                 </>
               ) : (
                 <>
-                  <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6" />
+                  <ShieldCheck className="w-5 h-5 shrink-0" />
                   {t.checkBtn}
                 </>
               )}
@@ -466,9 +382,9 @@ export function ThreatScannerView({
               type="button"
               disabled={isAnalyzing}
               onClick={() => setShowCameraModal(true)}
-              className="lg:col-span-2 min-h-[52px] sm:min-h-[60px] px-3 py-2.5 rounded-lg bg-white border-2 border-[#0F172A] text-[#0F172A] text-sm sm:text-[15px] font-bold hover:bg-[#F1F5F9] inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
+              className="lg:col-span-2 min-h-[46px] sm:min-h-[54px] px-3 py-2 rounded-lg bg-white border-2 border-[#0F172A] text-[#0F172A] text-sm font-bold hover:bg-[#F1F5F9] inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
             >
-              <Camera className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <Camera className="w-4 h-4 shrink-0" />
               <span className="truncate">{t.cameraBtn}</span>
             </button>
 
@@ -476,9 +392,9 @@ export function ThreatScannerView({
               type="button"
               disabled={isAnalyzing}
               onClick={() => photoInputRef.current?.click()}
-              className="lg:col-span-2 min-h-[52px] sm:min-h-[60px] px-3 py-2.5 rounded-lg bg-white border-2 border-[#CBD5E1] text-[#0F172A] text-sm sm:text-[15px] font-semibold hover:bg-[#F1F5F9] inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
+              className="lg:col-span-2 min-h-[46px] sm:min-h-[54px] px-3 py-2 rounded-lg bg-white border-2 border-[#CBD5E1] text-[#0F172A] text-sm font-semibold hover:bg-[#F1F5F9] inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
             >
-              <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <ImageIcon className="w-4 h-4 shrink-0" />
               <span className="truncate">{t.photoUploadBtn}</span>
             </button>
 
@@ -486,7 +402,7 @@ export function ThreatScannerView({
               type="button"
               disabled={isAnalyzing && !isRecording}
               onClick={toggleVoiceRecording}
-              className={`lg:col-span-2 min-h-[52px] sm:min-h-[60px] px-3 py-2.5 rounded-lg text-sm sm:text-[15px] font-bold inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap ${
+              className={`lg:col-span-2 min-h-[46px] sm:min-h-[54px] px-3 py-2 rounded-lg text-sm font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap ${
                 isRecording
                   ? 'bg-[#DC2626] text-white hover:bg-[#B91C1C]'
                   : 'bg-white border-2 border-[#0F172A] text-[#0F172A] hover:bg-[#F1F5F9]'
@@ -494,14 +410,14 @@ export function ThreatScannerView({
             >
               {isRecording ? (
                 <>
-                  <Square className="w-4 h-4 fill-current shrink-0" />
+                  <Square className="w-3.5 h-3.5 fill-current shrink-0" />
                   <span className="tabular-nums truncate">
                     {t.voiceStopBtn} ({recordingSeconds}s)
                   </span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                  <Mic className="w-4 h-4 shrink-0" />
                   <span className="truncate">{t.voiceBtn}</span>
                 </>
               )}
@@ -511,7 +427,7 @@ export function ThreatScannerView({
               type="button"
               disabled={isAnalyzing}
               onClick={() => audioFileRef.current?.click()}
-              className="lg:col-span-2 min-h-[52px] sm:min-h-[60px] px-3 py-2.5 rounded-lg bg-white border-2 border-[#CBD5E1] text-[#0F172A] text-sm sm:text-[15px] font-semibold hover:bg-[#F1F5F9] inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
+              className="lg:col-span-2 min-h-[46px] sm:min-h-[54px] px-3 py-2 rounded-lg bg-white border-2 border-[#CBD5E1] text-[#0F172A] text-sm font-semibold hover:bg-[#F1F5F9] inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
             >
               <Upload className="w-4 h-4 shrink-0" />
               <span className="truncate">{t.audioUploadBtn}</span>
@@ -533,50 +449,41 @@ export function ThreatScannerView({
             onChange={handleAudioFileUpload}
           />
 
-          {/* Status / Transcript / Photo Preview Feedback */}
           {statusNote && (
-            <div className="rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] px-4 py-3 text-[16px] font-medium text-[#1E3A8A] flex items-center gap-2.5">
-              <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+            <div className="rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] px-3.5 py-2.5 text-sm font-medium text-[#1E3A8A] flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
               <span>{statusNote}</span>
             </div>
           )}
 
           {scannedPhotoPreview && (
-            <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex flex-col sm:flex-row items-start gap-4">
+            <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3 flex items-center gap-3">
               <img
                 src={scannedPhotoPreview}
-                alt="Scanned link or message screenshot"
-                className="w-28 h-20 object-cover rounded border border-[#CBD5E1] shrink-0"
+                alt="Scanned preview"
+                className="w-20 h-14 object-cover rounded border border-[#CBD5E1] shrink-0"
               />
-              <div className="space-y-1 text-sm">
-                <div className="font-bold text-[#0F172A]">
-                  {lang === 'hi' ? 'फोटो से पढ़ा गया विवरण:' : 'Photo Scanned:'}
-                </div>
-                {photoVisualClues && <p className="text-[#334155]">{photoVisualClues}</p>}
-              </div>
+              {photoVisualClues && <p className="text-xs sm:text-sm text-[#334155] line-clamp-2">{photoVisualClues}</p>}
             </div>
           )}
 
           {voiceTranscript && (
-            <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-sm text-[#334155]">
-              <strong className="text-[#0F172A]">
-                {lang === 'hi' ? 'आपने बोला:' : 'Voice Detected:'}
-              </strong>{' '}
+            <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3.5 py-2.5 text-sm text-[#334155]">
               “{voiceTranscript}”
             </div>
           )}
 
           {errorMessage && (
-            <div className="rounded-lg border border-[#FCA5A5] bg-[#FEF2F2] px-4 py-3.5 text-[#991B1B] text-[16px] flex items-center gap-2.5">
-              <AlertCircle className="w-5 h-5 shrink-0" />
+            <div className="rounded-lg border border-[#FCA5A5] bg-[#FEF2F2] px-3.5 py-2.5 text-[#991B1B] text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          {/* One-Tap Sample Test Chips */}
-          <div className="pt-3 border-t border-[#F1F5F9] flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-[#475569] mr-1">
-              {lang === 'hi' ? 'टेस्ट करके देखें:' : 'Try a quick test:'}
+          {/* Single-Row Scrollable Sample Chips on Phone, Wrapping on Desktop */}
+          <div className="pt-2.5 border-t border-[#F1F5F9] flex items-center gap-2 overflow-x-auto no-scrollbar sm:flex-wrap">
+            <span className="text-xs font-bold uppercase text-[#64748B] shrink-0">
+              {lang === 'hi' ? 'टेस्ट:' : 'Try:'}
             </span>
             {quickExamples.map((ex) => (
               <button
@@ -587,7 +494,7 @@ export function ThreatScannerView({
                   setInputText(ex.preset.content);
                   analyzeTextOrLink(ex.preset.content, ex.preset.url, ex.preset.apkMetadata);
                 }}
-                className="px-3.5 py-2 rounded-lg bg-[#F8FAFC] border border-[#CBD5E1] text-sm font-semibold text-[#0F172A] hover:border-[#0F172A] hover:bg-white whitespace-nowrap"
+                className="px-3 py-1.5 rounded-md bg-[#F8FAFC] border border-[#CBD5E1] text-xs sm:text-sm font-semibold text-[#0F172A] hover:border-[#0F172A] hover:bg-white whitespace-nowrap shrink-0"
               >
                 {ex.label}
               </button>
@@ -595,29 +502,25 @@ export function ThreatScannerView({
           </div>
         </form>
 
-        {/* Collapsible Android APK Static Inspection Drawer */}
-        <div className="pt-3 border-t border-[#E2E8F0]">
+        {/* Collapsible APK Scanner */}
+        <div className="pt-2.5 border-t border-[#E2E8F0]">
           <button
             type="button"
             onClick={() => setShowApkTools((v) => !v)}
-            className="inline-flex items-center gap-2 text-sm font-semibold text-[#2563EB] hover:underline"
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[#2563EB] hover:underline"
           >
-            <Smartphone className="w-4 h-4" />
+            <Smartphone className="w-4 h-4 shrink-0" />
             <span>{t.apkAdvancedToggle}</span>
             {showApkTools ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
 
           {showApkTools && (
-            <div className="mt-4 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <FileArchive className="w-5 h-5 text-[#0F172A]" />
-                  <span className="text-[15px] font-bold text-[#0F172A]">
-                    {lang === 'hi'
-                      ? 'संदिग्ध Android .APK फाइल की सुरक्षित जांच (बिना इंस्टॉल किए)'
-                      : 'Safe Static Android .APK File Scanner (No Installation)'}
-                  </span>
-                </div>
+            <div className="mt-3 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3.5 sm:p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#0F172A]">
+                  <FileArchive className="w-4 h-4 shrink-0" />
+                  {lang === 'hi' ? '.APK फाइल जांच' : 'Static .APK Check'}
+                </span>
                 <div className="flex flex-wrap gap-2">
                   <input
                     ref={apkFileInputRef}
@@ -632,51 +535,50 @@ export function ThreatScannerView({
                   <button
                     type="button"
                     onClick={() => apkFileInputRef.current?.click()}
-                    className="px-3.5 py-2 rounded-lg bg-white border border-[#CBD5E1] text-xs font-semibold text-[#0F172A] hover:bg-[#F1F5F9]"
+                    className="px-3 py-1.5 rounded-md bg-white border border-[#CBD5E1] text-xs font-semibold text-[#0F172A]"
                   >
                     Upload .APK
                   </button>
                   <button
                     type="button"
                     onClick={handleLoadSafeTestApk}
-                    className="px-3.5 py-2 rounded-lg bg-[#0F172A] text-white text-xs font-semibold hover:bg-[#1E293B]"
+                    className="px-3 py-1.5 rounded-md bg-[#0F172A] text-white text-xs font-semibold"
                   >
-                    {lang === 'hi' ? 'टेस्ट .APK लोड करें' : 'Load Safe Test APK'}
+                    {lang === 'hi' ? 'टेस्ट .APK' : 'Test APK'}
                   </button>
                 </div>
               </div>
 
               {parsedApk && (
-                <div className="text-xs font-mono text-[#0F172A] bg-white border border-[#E2E8F0] rounded px-3 py-2">
-                  Loaded: {parsedApk.fileName} ({parsedApk.fileSizeKb} KB, {parsedApk.archiveEntriesCount} entries,{' '}
-                  {parsedApk.detectedPermissions.length} permissions detected)
+                <div className="text-xs font-mono text-[#0F172A] bg-white border border-[#E2E8F0] rounded px-3 py-1.5 truncate">
+                  {parsedApk.fileName} ({parsedApk.fileSizeKb} KB · {parsedApk.detectedPermissions.length} perms)
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <input
                   type="text"
                   value={apkAppName}
                   onChange={(e) => setApkAppName(e.target.value)}
-                  placeholder="App Name (e.g. QuickRupee VIP)"
-                  className="min-h-[44px] px-3.5 rounded-lg bg-white border border-[#94A3B8] text-sm text-[#0F172A]"
+                  placeholder="App Name"
+                  className="min-h-[42px] px-3 rounded-lg bg-white border border-[#94A3B8] text-sm text-[#0F172A]"
                 />
                 <input
                   type="text"
                   value={apkPackageName}
                   onChange={(e) => setApkPackageName(e.target.value)}
-                  placeholder="Package ID (e.g. com.quickrupee.vip.cashloan)"
-                  className="min-h-[44px] px-3.5 rounded-lg bg-white border border-[#94A3B8] font-mono text-sm text-[#0F172A]"
+                  placeholder="com.example.app"
+                  className="min-h-[42px] px-3 rounded-lg bg-white border border-[#94A3B8] font-mono text-sm text-[#0F172A]"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {APK_PERMISSION_OPTIONS.map((p) => {
                   const checked = apkPermissions.includes(p.id);
                   return (
                     <label
                       key={p.id}
-                      className="flex items-center gap-2 px-3 py-2 rounded-md bg-white border border-[#CBD5E1] text-xs font-medium text-[#0F172A] cursor-pointer"
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-white border border-[#CBD5E1] text-xs font-medium text-[#0F172A] cursor-pointer"
                     >
                       <input
                         type="checkbox"
@@ -686,9 +588,9 @@ export function ThreatScannerView({
                             prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]
                           )
                         }
-                        className="w-4 h-4 accent-[#0F172A]"
+                        className="w-3.5 h-3.5 accent-[#0F172A] shrink-0"
                       />
-                      <span>{p.label}</span>
+                      <span className="truncate">{p.label}</span>
                     </label>
                   );
                 })}
@@ -698,7 +600,7 @@ export function ThreatScannerView({
         </div>
       </section>
 
-      {/* LIVE RESULT OUTPUT (Verdict + Audio + WhatsApp Share + Police Report Form) */}
+      {/* LIVE RESULT OUTPUT */}
       {latestResult && (
         <div ref={resultSectionRef}>
           <AnalysisResultPanel
@@ -711,106 +613,106 @@ export function ThreatScannerView({
         </div>
       )}
 
-      {/* LIVE TRENDING SCAM LINKS & CYBER NEWS STRIP RIGHT ON HOME PAGE */}
-      <section className="space-y-5 pt-4 border-t border-[#E2E8F0]">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <Flame className="w-5 h-5 text-[#DC2626]" />
-              <h2 className="text-[24px] font-bold text-[#0F172A]">{t.trendingHeading}</h2>
-            </div>
-            <p className="text-[16px] text-[#475569] mt-0.5">{t.trendingSub}</p>
+      {/* TRENDING SCAMS STRIP */}
+      <section className="space-y-4 pt-3 border-t border-[#E2E8F0]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Flame className="w-5 h-5 text-[#DC2626] shrink-0" />
+            <h2 className="text-lg sm:text-[22px] font-bold text-[#0F172A] truncate">
+              {t.trendingHeading}
+            </h2>
           </div>
           <button
             type="button"
             onClick={onOpenTrendingTab}
-            className="inline-flex items-center gap-1.5 text-sm font-bold text-[#2563EB] hover:underline whitespace-nowrap self-start sm:self-auto"
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#2563EB] hover:underline whitespace-nowrap shrink-0"
           >
             <Newspaper className="w-4 h-4" />
-            {lang === 'hi' ? 'सभी ट्रेंडिंग स्कैम देखें →' : 'See All Trending Scams →'}
+            {lang === 'hi' ? 'सभी देखें →' : 'See All →'}
           </button>
         </div>
 
-        {/* 2-Column Split: Trending Reported Scam Links + Latest Fraud News */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          {/* Trending Malicious Links & UPIs */}
-          <div className="lg:col-span-5 card-resting rounded-lg p-6 space-y-4">
-            <h3 className="text-[18px] font-bold text-[#0F172A]">
-              {lang === 'hi' ? 'ट्रेंडिंग खतरनाक लिंक व UPI' : 'Trending Scam Links & UPIs'}
-            </h3>
-            <div className="divide-y divide-[#F1F5F9]">
-              {topTrendingLinks.map((item) => {
-                const waText = encodeURIComponent(
-                  lang === 'hi'
-                    ? `⚠️ *कवच चेतावनी*: यह ${item.value.replace(/\./g, '[.]')} एक खतरनाक स्कैम (${item.associatedCategories[0]}) में ${item.reportCount} बार रिपोर्ट हुआ है। क्लिक न करें और पैसे न भेजें! हेल्पलाइन: 1930`
-                    : `⚠️ *Kavach Alert*: ${item.value.replace(/\./g, '[.]')} has been reported ${item.reportCount} times for ${item.associatedCategories[0]}. Do NOT click or pay! Helpline: 1930`
-                );
-                return (
-                  <div key={`${item.type}-${item.value}`} className="py-3.5 first:pt-1 last:pb-0 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-sm font-bold text-[#0F172A] break-all">
-                        {item.type === 'domain' ? item.value.replace(/\./g, '[.]') : item.value}
-                      </span>
-                      <RiskBadge level={item.riskLevel} size="sm" />
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#475569]">
-                      <span className="tabular-nums">
-                        {item.reportCount} {lang === 'hi' ? 'रिपोर्ट' : 'reports'} · {item.associatedCategories[0]}
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const sample =
-                              item.type === 'domain'
-                                ? `http://${item.value}`
-                                : `Suspicious scam identifier: ${item.value}`;
-                            setInputText(sample);
-                            analyzeTextOrLink(sample, item.type === 'domain' ? `http://${item.value}` : undefined);
-                          }}
-                          className="font-bold text-[#0F172A] hover:underline"
-                        >
-                          {t.checkThisBtn}
-                        </button>
-                        <a
-                          href={`https://wa.me/?text=${waText}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-bold text-[#166534] hover:underline"
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                          WhatsApp
-                        </a>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+          {isInvestigator && topTrendingLinks.length > 0 && (
+            <div className="lg:col-span-5 card-resting rounded-lg p-4 sm:p-5 space-y-3">
+              <h3 className="text-base font-bold text-[#0F172A]">
+                {lang === 'hi' ? 'अधिकारी हीट-लिस्ट' : 'Officer Heat-List'}
+              </h3>
+              <div className="divide-y divide-[#F1F5F9]">
+                {topTrendingLinks.map((item) => {
+                  const waText = encodeURIComponent(
+                    lang === 'hi'
+                      ? `⚠️ कवच अलर्ट: ${item.value.replace(/\./g, '[.]')} (${item.reportCount} रिपोर्ट)। क्लिक न करें! 1930`
+                      : `⚠️ Kavach Alert: ${item.value.replace(/\./g, '[.]')} (${item.reportCount} reports). Do NOT click! 1930`
+                  );
+                  return (
+                    <div key={`${item.type}-${item.value}`} className="py-2.5 first:pt-0 last:pb-0 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs sm:text-sm font-bold text-[#0F172A] break-all">
+                          {item.type === 'domain' ? item.value.replace(/\./g, '[.]') : item.value}
+                        </span>
+                        <RiskBadge level={item.riskLevel} size="sm" />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-xs text-[#475569]">
+                        <span className="tabular-nums truncate">
+                          {item.reportCount} {lang === 'hi' ? 'रिपोर्ट' : 'reports'}
+                        </span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sample =
+                                item.type === 'domain' ? `http://${item.value}` : item.value;
+                              setInputText(sample);
+                              analyzeTextOrLink(sample, item.type === 'domain' ? `http://${item.value}` : undefined);
+                            }}
+                            className="font-bold text-[#0F172A] hover:underline"
+                          >
+                            {t.checkThisBtn}
+                          </button>
+                          <a
+                            href={`https://wa.me/?text=${waText}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-bold text-[#166534] hover:underline"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            WhatsApp
+                          </a>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Latest Scam News Cards */}
-          <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div
+            className={`${
+              isInvestigator && topTrendingLinks.length > 0 ? 'lg:col-span-7' : 'lg:col-span-12'
+            } grid grid-cols-1 sm:grid-cols-2 gap-3.5`}
+          >
             {TRENDING_SCAM_NEWS.slice(0, 4).map((news) => {
               const waHref = `https://wa.me/?text=${encodeURIComponent(
                 lang === 'hi'
-                  ? `⚠️ *कवच साइबर अलर्ट*\n${news.titleHi}\n${news.summaryHi}\nसावधान रहें — हेल्पलाइन 1930`
-                  : `⚠️ *Kavach Cyber Alert*\n${news.titleEn}\n${news.summaryEn}\nStay safe — Helpline 1930`
+                  ? `⚠️ कवच अलर्ट: ${news.titleHi} — ${news.summaryHi} (1930)`
+                  : `⚠️ Kavach Alert: ${news.titleEn} — ${news.summaryEn} (1930)`
               )}`;
               return (
                 <article
                   key={news.id}
-                  className="card-resting rounded-lg p-5 flex flex-col justify-between gap-3"
+                  className="card-resting rounded-lg p-4 flex flex-col justify-between gap-2.5"
                 >
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <div className="flex items-center justify-between gap-2 text-xs font-semibold text-[#475569]">
-                      <span>{lang === 'hi' ? news.tagHi : news.tagEn}</span>
+                      <span className="truncate">{lang === 'hi' ? news.tagHi : news.tagEn}</span>
                       <RiskBadge level={news.severity} size="sm" />
                     </div>
-                    <h3 className="text-[16px] font-bold text-[#0F172A] leading-snug">
+                    <h3 className="text-[15px] font-bold text-[#0F172A] leading-snug">
                       {lang === 'hi' ? news.titleHi : news.titleEn}
                     </h3>
-                    <p className="text-sm text-[#475569] leading-relaxed">
+                    <p className="text-xs sm:text-sm text-[#475569] line-clamp-2">
                       {lang === 'hi' ? news.summaryHi : news.summaryEn}
                     </p>
                   </div>
@@ -823,7 +725,7 @@ export function ThreatScannerView({
                       }}
                       className="font-bold text-[#2563EB] hover:underline"
                     >
-                      {lang === 'hi' ? 'कवच पर जांचें' : 'Inspect Sample'}
+                      {t.checkThisBtn}
                     </button>
                     <a
                       href={waHref}
@@ -842,7 +744,6 @@ export function ThreatScannerView({
         </div>
       </section>
 
-      {/* Live Camera Capture Modal */}
       {showCameraModal && (
         <CameraCaptureModal
           lang={lang}

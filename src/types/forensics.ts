@@ -233,4 +233,40 @@ export interface CommunityPost {
   replies: CommunityReply[];
 }
 
+export type UserRole = 'citizen' | 'investigator';
 
+export interface AuthUser {
+  id: string;
+  role: UserRole;
+  fullName: string;
+  email: string;
+  badgeId?: string;
+  department?: string;
+  idProofVerified?: boolean;
+  idProofHash?: string;
+  idProofPreview?: string;
+  createdAt: string;
+}
+
+export interface CampaignCluster {
+  id: string;
+  name: string;
+  sharedEntities: string[];
+  caseIds: string[];
+  riskLevel: RiskLevel;
+  channels: string[];
+  summary: string;
+}
+
+export interface HeatListPayload {
+  items: HeatListItem[];
+  clusters: CampaignCluster[];
+  stats: {
+    totalCases: number;
+    highRiskCount: number;
+    mediumRiskCount: number;
+    lowRiskCount: number;
+    linkedCasesCount: number;
+    uniqueRiskyIdentifiers: number;
+  };
+}

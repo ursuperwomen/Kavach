@@ -16,8 +16,10 @@ import {
   synthesizeSpeechWithGemini,
   transcribeAudioWithGemini,
 } from './server/analyzer';
+import { authStore } from './server/auth';
 import { communityStore } from './server/community';
 import { caseStore } from './server/store';
+import type { AuthUser } from './src/types/forensics';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,8 +68,138 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '12mb' }));
 
-  // List cases with search & filter
-  app.get('/api/cases', (req, res) => {
+  const extractBearerToken = (req: express.Request): string | undefined => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return undefined;
+    return authHeader.slice(7).trim() || undefined;
+  };
+
+  const getRequestUser = (req: express.Request): AuthUser | null => {
+    return authStore.getUserFromToken(extractBearerToken(req));
+  };
+
+  const requireInvestigator: express.RequestHandler = (req, res, next) => {
+    const user = getRequestUser(req);
+    if (!user) {
+      res.status(401).json({
+        error: 'Investigator sign-in required. Create or sign in with a verified Officer ID.',
+      });
+      return;
+    }
+    if (user.role !== 'investigator' || !user.idProofVerified) {
+      res.status(403).json({
+        error: 'Access restricted to verified Cyber Cell Investigators only.',
+      });
+      return;
+    }
+    res.locals.user = user;
+    next();
+  };
+
+  // --- Authentication Routes (Optional for Citizens; ID-Card Verified for Investigators) ---
+  app.get('/api/auth/me', (req, res) => {
+    const user = getRequestUser(req);
+    res.json({ user });
+  });
+
+  app.post('/api/auth/register-investigator', (req, res) => {
+    const { fullName, email, password, badgeId, department, idCardDataUrl } = req.body as {
+      fullName?: string;
+      email?: string;
+      password?: string;
+      badgeId?: string;
+      department?: string;
+      idCardDataUrl?: string;
+    };
+
+    const result = authStore.registerInvestigator({
+      fullName: typeof fullName === 'string' ? fullName : '',
+      email: typeof email === 'string' ? email : '',
+      password: typeof password === 'string' ? password : '',
+      badgeId: typeof badgeId === 'string' ? badgeId : '',
+      department: typeof department === 'string' ? department : '',
+      idCardDataUrl: typeof idCardDataUrl === 'string' ? idCardDataUrl : '',
+    });
+
+    if (result.error || !result.token || !result.user) {
+      res.status(400).json({ error: result.error || 'Investigator registration failed.' });
+      return;
+    }
+    res.status(201).json({ token: result.token, user: result.user });
+  });
+
+  app.post('/api/auth/register-citizen', (req, res) => {
+    const { fullName, email, password } = req.body as {
+      fullName?: string;
+      email?: string;
+      password?: string;
+    };
+
+    const result = authStore.registerCitizen({
+      fullName: typeof fullName === 'string' ? fullName : '',
+      email: typeof email === 'string' ? email : '',
+      password: typeof password === 'string' ? password : '',
+    });
+
+    if (result.error || !result.token || !result.user) {
+      res.status(400).json({ error: result.error || 'Citizen registration failed.' });
+      return;
+    }
+    res.status(201).json({ token: result.token, user: result.user });
+  });
+
+  app.post('/api/auth/login', (req, res) => {
+    const { email, password } = req.body as { email?: string; password?: string };
+    const result = authStore.login(
+      typeof email === 'string' ? email : '',
+      typeof password === 'string' ? password : ''
+    );
+    if (result.error || !result.token || !result.user) {
+      res.status(401).json({ error: result.error || 'Invalid credentials.' });
+      return;
+    }
+    res.json({ token: result.token, user: result.user });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    authStore.logout(extractBearerToken(req));
+    res.json({ ok: true });
+  });
+
+  app.post('/api/auth/forgot-password', (req, res) => {
+    const { email } = req.body as { email?: string };
+    const result = authStore.requestPasswordReset(typeof email === 'string' ? email : '');
+    if (result.error || !result.sent) {
+      res.status(404).json({ error: result.error || 'Could not initiate password reset.' });
+      return;
+    }
+    res.json({
+      sent: true,
+      demoResetCode: result.demoResetCode,
+      expiresInMinutes: result.expiresInMinutes,
+    });
+  });
+
+  app.post('/api/auth/reset-password', (req, res) => {
+    const { email, code, newPassword } = req.body as {
+      email?: string;
+      code?: string;
+      newPassword?: string;
+    };
+    const result = authStore.resetPassword(
+      typeof email === 'string' ? email : '',
+      typeof code === 'string' ? code : '',
+      typeof newPassword === 'string' ? newPassword : ''
+    );
+    if (result.error || !result.ok) {
+      res.status(400).json({ error: result.error || 'Could not reset password.' });
+      return;
+    }
+    res.json({ ok: true, role: result.role });
+  });
+
+  // List cases with search & filter (INVESTIGATOR ONLY)
+  app.get('/api/cases', requireInvestigator, (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
     const risk = typeof req.query.risk === 'string' ? req.query.risk.toUpperCase() : '';
     const assetType = typeof req.query.assetType === 'string' ? req.query.assetType.toLowerCase() : '';
@@ -110,8 +242,8 @@ async function startServer() {
     res.json({ cases: results, total: results.length });
   });
 
-  // Get single case
-  app.get('/api/cases/:caseId', (req, res) => {
+  // Get single case (INVESTIGATOR ONLY)
+  app.get('/api/cases/:caseId', requireInvestigator, (req, res) => {
     const found = caseStore.getCaseById(req.params.caseId);
     if (!found) {
       res.status(404).json({ error: 'Case record not found.' });
@@ -149,13 +281,20 @@ async function startServer() {
         return;
       }
 
+      const reqUser = getRequestUser(req);
+      const defaultSubmitter = reqUser
+        ? reqUser.role === 'investigator'
+          ? `Officer ${reqUser.fullName} (${reqUser.badgeId})`
+          : `Citizen ${reqUser.fullName}`
+        : undefined;
+
       const payload: AnalyzeRequestPayload = {
         assetType,
         channel,
         content: content || url || body.apkMetadata?.appName || 'APK inspection submission',
         url: url || (/^https?:\/\/\S+$/i.test(content) ? content : undefined),
         senderInfo,
-        submittedBy,
+        submittedBy: submittedBy || defaultSubmitter,
         lang,
         apkMetadata: body.apkMetadata,
         saveToLedger: body.saveToLedger !== false,
@@ -367,8 +506,8 @@ async function startServer() {
     res.status(201).json(filed);
   });
 
-  // Update case status / append investigator log note
-  app.patch('/api/cases/:caseId', (req, res) => {
+  // Update case status / append investigator log note (INVESTIGATOR ONLY)
+  app.patch('/api/cases/:caseId', requireInvestigator, (req, res) => {
     const { status, note, actor } = req.body as {
       status?: CaseStatus;
       note?: string;
@@ -380,10 +519,13 @@ async function startServer() {
       return;
     }
 
+    const officer = res.locals.user as AuthUser;
+    const verifiedActor = `${officer.fullName} (${officer.badgeId || 'Investigator'})`;
+
     const updated = caseStore.updateCase(req.params.caseId, {
       status,
       note: typeof note === 'string' ? note.slice(0, 2000) : undefined,
-      actor: typeof actor === 'string' ? actor.slice(0, 100) : undefined,
+      actor: typeof actor === 'string' && actor.trim() ? actor.slice(0, 100) : verifiedActor,
     });
 
     if (!updated) {
@@ -394,8 +536,8 @@ async function startServer() {
     res.json({ caseRecord: updated });
   });
 
-  // Heat-list & cross-campaign entity clusters
-  app.get('/api/heatlist', (_req, res) => {
+  // Heat-list & cross-campaign entity clusters (INVESTIGATOR ONLY)
+  app.get('/api/heatlist', requireInvestigator, (_req, res) => {
     res.json(caseStore.getHeatList());
   });
 

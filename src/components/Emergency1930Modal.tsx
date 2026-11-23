@@ -22,34 +22,33 @@ export function Emergency1930Modal({ lang, onClose }: Emergency1930ModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/65 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/65 p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="emergency-title"
     >
-      <div className="card-elevated w-full max-w-xl rounded-lg overflow-hidden">
-        <div className="px-6 py-5 bg-[#DC2626] text-white flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <ShieldAlert className="w-7 h-7 shrink-0 mt-0.5" />
-            <div>
-              <h2 id="emergency-title" className="text-[20px] font-extrabold leading-snug">
-                {lang === 'hi' ? 'साइबर इमरजेंसी मदद (हेल्पलाइन 1930)' : 'Cyber Emergency Help (Helpline 1930)'}
-              </h2>
-              <p className="text-sm text-white/90 mt-1">{t.emergencyBannerTitle}</p>
-            </div>
+      <div className="card-elevated w-full max-w-lg max-h-[92dvh] flex flex-col rounded-lg overflow-hidden">
+        <div className="px-4 sm:px-6 py-4 bg-[#DC2626] text-white flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <ShieldAlert className="w-6 h-6 shrink-0" />
+            <h2 id="emergency-title" className="text-[17px] sm:text-[19px] font-extrabold truncate">
+              {lang === 'hi' ? 'हेल्पलाइन 1930 — तुरंत कदम' : 'Emergency 1930'}
+            </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-md text-white/90 hover:bg-white/15"
-            aria-label="Close emergency help"
+            className="p-1.5 rounded-md text-white/90 hover:bg-white/15 shrink-0"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-5 bg-white">
-          <div className="space-y-3">
+        <div className="p-4 sm:p-6 space-y-4 bg-white overflow-y-auto">
+          <p className="text-sm font-semibold text-[#334155]">{t.emergencyBannerTitle}</p>
+
+          <div className="space-y-2.5">
             {steps.map((step, idx) => {
               const done = checkedSteps.includes(idx);
               return (
@@ -57,19 +56,19 @@ export function Emergency1930Modal({ lang, onClose }: Emergency1930ModalProps) {
                   key={idx}
                   type="button"
                   onClick={() => toggleStep(idx)}
-                  className={`w-full text-left flex items-start gap-3.5 p-4 rounded-lg border ${
+                  className={`w-full text-left flex items-start gap-3 p-3.5 rounded-lg border ${
                     done
                       ? 'bg-[#F0FDF4] border-[#86EFAC] text-[#166534]'
                       : 'bg-[#F8FAFC] border-[#CBD5E1] text-[#0F172A]'
                   }`}
                 >
                   {done ? (
-                    <CheckSquare className="w-6 h-6 text-[#16A34A] shrink-0 mt-0.5" />
+                    <CheckSquare className="w-5 h-5 text-[#16A34A] shrink-0 mt-0.5" />
                   ) : (
-                    <Square className="w-6 h-6 text-[#475569] shrink-0 mt-0.5" />
+                    <Square className="w-5 h-5 text-[#475569] shrink-0 mt-0.5" />
                   )}
-                  <span className="text-[17px] leading-[26px] font-medium">
-                    <strong className="mr-1.5">{idx + 1}.</strong>
+                  <span className="text-sm sm:text-[15px] leading-snug font-medium">
+                    <strong className="mr-1">{idx + 1}.</strong>
                     {step}
                   </span>
                 </button>
@@ -77,29 +76,18 @@ export function Emergency1930Modal({ lang, onClose }: Emergency1930ModalProps) {
             })}
           </div>
 
-          <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="text-xs font-bold uppercase tracking-[0.06em] text-[#475569]">
-                {lang === 'hi' ? 'राष्ट्रीय साइबर अपराध हेल्पलाइन' : 'National Cybercrime Helpline'}
-              </div>
-              <div className="text-2xl font-extrabold text-[#0F172A] tabular-nums mt-0.5">
-                1930 · cybercrime.gov.in
-              </div>
-            </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
             <a
               href="tel:1930"
-              className="min-h-[52px] px-6 py-3 rounded-lg bg-[#DC2626] text-white font-bold text-[16px] hover:bg-[#B91C1C] inline-flex items-center justify-center gap-2 whitespace-nowrap"
+              className="flex-1 min-h-[48px] px-5 py-2.5 rounded-lg bg-[#DC2626] text-white font-bold text-sm sm:text-base hover:bg-[#B91C1C] inline-flex items-center justify-center gap-2 whitespace-nowrap"
             >
-              <PhoneCall className="w-5 h-5" />
-              {lang === 'hi' ? '1930 पर कॉल करें' : 'Call 1930 Now'}
+              <PhoneCall className="w-4 h-4 shrink-0" />
+              {lang === 'hi' ? '1930 पर कॉल करें' : 'Call 1930'}
             </a>
-          </div>
-
-          <div className="flex justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[48px] px-6 rounded-lg bg-[#0F172A] text-white font-semibold text-sm hover:bg-[#1E293B]"
+              className="min-h-[48px] px-5 rounded-lg bg-[#0F172A] text-white font-semibold text-sm hover:bg-[#1E293B]"
             >
               {lang === 'hi' ? 'बंद करें' : 'Close'}
             </button>
