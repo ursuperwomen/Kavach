@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Plus Jakarta Sans", "Noto Sans Devanagari", system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter", "Noto Sans Devanagari", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-canvas: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-navy: #0F172A;
+  --color-navy-hover: #1E293B;
+  --color-slate-body: #334155;
+  --color-slate-muted: #475569;
+  --color-border-hairline: #E2E8F0;
+  --color-border-input: #94A3B8;
+  --color-link-blue: #2563EB;
+
+  --color-risk-high: #DC2626;
+  --color-risk-high-bg: #FEF2F2;
+  --color-risk-high-border: #FCA5A5;
+  --color-risk-high-text: #991B1B;
+
+  --color-risk-med: #D97706;
+  --color-risk-med-bg: #FFFBEB;
+  --color-risk-med-border: #FCD34D;
+  --color-risk-med-text: #92400E;
+
+  --color-risk-low: #16A34A;
+  --color-risk-low-bg: #F0FDF4;
+  --color-risk-low-border: #86EFAC;
+  --color-risk-low-text: #166534;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: #F8FAFC;
+    color: #0F172A;
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  button, a, input, textarea, select {
+    transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 3px solid #2563EB;
+    outline-offset: 2px;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.card-resting {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05);
+}
+
+.card-elevated {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
