@@ -21,7 +21,7 @@ import {
   Square,
   Volume2,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UI_COPY } from '../data/translations';
 import type { AppLanguage, CaseRecord } from '../types/forensics';
 import {
@@ -56,10 +56,49 @@ export function AnalysisResultPanel({
   const [waCopied, setWaCopied] = useState(false);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(true);
 
-  // Audio playback (Gemini 3.8 TTS)
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  // Audio playback (Gemini 3.8 TTS via Web Audio API unlocked on click + Blob fallback)
+  const [audioStatus, setAudioStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioObjectUrlRef = useRef<string | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+
+  const stopAudioPlayback = () => {
+    if (ttsAbortRef.current) {
+      ttsAbortRef.current.abort();
+      ttsAbortRef.current = null;
+    }
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.onended = null;
+        audioSourceRef.current.stop();
+        audioSourceRef.current.disconnect();
+      } catch {
+        // already stopped
+      }
+      audioSourceRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+    }
+    setAudioStatus('idle');
+  };
+
+  useEffect(() => {
+    stopAudioPlayback();
+    setAudioError(null);
+    return () => {
+      stopAudioPlayback();
+    };
+  }, [record.caseId, lang]);
 
   // Direct Report to Cyber Police form state
   const [policeCity, setPoliceCity] = useState('');
@@ -116,11 +155,28 @@ export function AnalysisResultPanel({
 
   const handleListenVerdict = async () => {
     setAudioError(null);
-    if (isPlayingAudio && audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-      setIsPlayingAudio(false);
+    if (audioStatus === 'loading' || audioStatus === 'playing') {
+      stopAudioPlayback();
       return;
+    }
+
+    // Unlock Web Audio Context synchronously inside the user tap so mobile Safari/Chrome & iframes allow playback after async fetch
+    let ctx: AudioContext | null = null;
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+          audioCtxRef.current = new AudioCtx();
+        }
+        ctx = audioCtxRef.current;
+        if (ctx.state === 'suspended') {
+          void ctx.resume();
+        }
+      }
+    } catch {
+      ctx = null;
     }
 
     const spokenText =
@@ -150,31 +206,76 @@ export function AnalysisResultPanel({
               : 'Always double-check before sharing personal details.')
           }`;
 
-    setIsPlayingAudio(true);
+    const abortController = new AbortController();
+    ttsAbortRef.current = abortController;
+    setAudioStatus('loading');
+
     try {
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: spokenText, lang }),
+        signal: abortController.signal,
       });
       const data = await res.json();
       if (!res.ok || !data.audioBase64) {
         throw new Error(data.error || 'Could not generate audio.');
       }
-      const audio = new Audio(`data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`);
+
+      if (abortController.signal.aborted) return;
+
+      // Decode base64 WAV bytes into an ArrayBuffer
+      const binaryStr = window.atob(data.audioBase64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      // Primary playback path: gesture-unlocked AudioContext (works reliably on mobile & iframes)
+      if (ctx) {
+        try {
+          if (ctx.state === 'suspended') {
+            await ctx.resume();
+          }
+          const decodedBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+          if (abortController.signal.aborted) return;
+          const source = ctx.createBufferSource();
+          source.buffer = decodedBuffer;
+          source.connect(ctx.destination);
+          source.onended = () => {
+            audioSourceRef.current = null;
+            setAudioStatus('idle');
+          };
+          audioSourceRef.current = source;
+          setAudioStatus('playing');
+          source.start(0);
+          return;
+        } catch {
+          // Fall through to HTMLAudioElement Blob playback
+        }
+      }
+
+      // Fallback playback path: Blob Object URL on HTMLAudioElement
+      const blob = new Blob([bytes], { type: data.mimeType || 'audio/wav' });
+      const objectUrl = URL.createObjectURL(blob);
+      audioObjectUrlRef.current = objectUrl;
+      const audio = new Audio(objectUrl);
       audioRef.current = audio;
       audio.onended = () => {
-        setIsPlayingAudio(false);
-        audioRef.current = null;
+        stopAudioPlayback();
       };
       audio.onerror = () => {
-        setIsPlayingAudio(false);
-        audioRef.current = null;
+        stopAudioPlayback();
         setAudioError(lang === 'hi' ? 'ऑडियो चलाने में समस्या आई।' : 'Could not play audio clip.');
       };
+      setAudioStatus('playing');
       await audio.play();
     } catch (err) {
-      setIsPlayingAudio(false);
+      if (err instanceof Error && err.name === 'AbortError') {
+        setAudioStatus('idle');
+        return;
+      }
+      stopAudioPlayback();
       setAudioError(
         err instanceof Error
           ? err.message
@@ -321,9 +422,19 @@ export function AnalysisResultPanel({
           <button
             type="button"
             onClick={handleListenVerdict}
-            className="min-h-[52px] sm:min-h-[56px] px-4 py-3 rounded-lg bg-[#0F172A] text-white text-[15px] sm:text-[16px] font-bold hover:bg-[#1E293B] inline-flex items-center justify-center gap-2 whitespace-nowrap"
+            aria-pressed={audioStatus !== 'idle'}
+            className={`min-h-[52px] sm:min-h-[56px] px-4 py-3 rounded-lg text-white text-[15px] sm:text-[16px] font-bold inline-flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer transition-colors ${
+              audioStatus === 'playing'
+                ? 'bg-[#2563EB] hover:bg-[#1D4ED8]'
+                : 'bg-[#0F172A] hover:bg-[#1E293B]'
+            }`}
           >
-            {isPlayingAudio ? (
+            {audioStatus === 'loading' ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                <span>{lang === 'hi' ? 'आवाज़ तैयार हो रही है…' : 'Preparing Voice…'}</span>
+              </>
+            ) : audioStatus === 'playing' ? (
               <>
                 <Square className="w-4 h-4 fill-current shrink-0" />
                 <span>{t.listeningBtn}</span>

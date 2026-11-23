@@ -804,6 +804,24 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiClient;
 }
 
+let geminiBetaClient: GoogleGenAI | null = null;
+function getGeminiBetaClient(): GoogleGenAI | null {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === 'MY_GEMINI_API_KEY') return null;
+  if (!geminiBetaClient) {
+    geminiBetaClient = new GoogleGenAI({
+      apiKey: key,
+      apiVersion: 'v1beta',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return geminiBetaClient;
+}
+
 async function generateAiBrief(
   payload: AnalyzeRequestPayload,
   deterministic: ReturnType<typeof runDeterministicAnalysis>,
@@ -1032,7 +1050,7 @@ export async function synthesizeSpeechWithGemini(
   text: string,
   lang: 'en' | 'hi' = 'en'
 ): Promise<{ audioBase64?: string; mimeType?: string; error?: string }> {
-  const ai = getGeminiClient();
+  const ai = getGeminiBetaClient();
   if (!ai) {
     return {
       error: 'Audio read-aloud requires GEMINI_API_KEY in Settings > Secrets.',
@@ -1068,11 +1086,14 @@ export async function synthesizeSpeechWithGemini(
       },
     });
 
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const audioPart = parts.find((p) => Boolean(p.inlineData?.data));
+    const base64Audio = audioPart?.inlineData?.data;
+    const mimeType = audioPart?.inlineData?.mimeType || 'audio/wav';
     if (!base64Audio) {
       return { error: 'Audio synthesis returned empty output.' };
     }
-    return { audioBase64: base64Audio, mimeType: 'audio/wav' };
+    return { audioBase64: base64Audio, mimeType };
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : 'Unable to generate spoken audio.',
